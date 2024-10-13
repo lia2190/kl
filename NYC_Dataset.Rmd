@@ -1,0 +1,146 @@
+---
+title: "NYC Shooting assignment"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Shooting Incident Data Report
+
+## 9/17/2024
+
+## Introduction
+
+NYPD Shooting Incident DATASET is extracted from NYC Gov website, Data provided by Police Department (NYPD). The list is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the 2022.
+
+DATASET information from the Data owner (NYC Open Data): Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. In addition, information related to suspect and victim demographics is also included. This data can be used by the public to explore the nature of shooting/criminal activity.
+
+Three steps in this assignment: Import, clean Data and analyze.
+
+```{r include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+
+```
+
+### Import
+
+```{r echo=TRUE}
+#Import the data from the server
+url_in<-"https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+#Read the file
+cases<-read_csv(url_in)
+```
+
+### Data Cleaning
+
+```{r echo=TRUE}
+spec(cases)
+cases<-cases %>%
+select(-c(LOC_CLASSFCTN_DESC,LOC_OF_OCCUR_DESC,JURISDICTION_CODE,LOCATION_DESC,OCCUR_TIME)) %>%
+rename(DATE="OCCUR_DATE",Murder="STATISTICAL_MURDER_FLAG")
+#Format the Date
+cases$DATE <- as.Date(cases$DATE, format = "%m/%d/%Y")
+#Check for NA values
+cases %>%
+  summarize(across(everything(), ~ sum(is.na(.))))
+#Remove NA values from Latitude, Longitude and Lon_Lat, only few values
+cases<-cases %>%
+filter(!is.na(Latitude),!is.na(Longitude),!is.na(Lon_Lat))  %>%
+#Replace NA and (null) by UNKNOWN
+mutate(across(c(PERP_AGE_GROUP, PERP_SEX, PERP_RACE), ~ replace_na(., "UNKNOWN")))  %>%
+mutate(across(where(is.character),~ ifelse(. == "(null)", "UNKNOWN", .)))
+```
+
+### Visualization per BORO
+
+```{r echo=TRUE}
+
+#Data grouped by BORO, it includes the total number of incidents
+boro_cases <- cases %>% group_by(BORO) %>% 
+summarize(Incidents = n())
+ggplot(boro_cases, aes(x=BORO, y=Incidents, fill=BORO)) +
+geom_bar(stat="identity") +
+xlab("BORO") + ylab("Incidents") +
+ggtitle("Incidents per BORO") 
+```
+
+### Visualization per Victim Race per BORO
+
+```{r echo=TRUE}
+casestb<-cases %>%
+filter(VIC_RACE!="UNKNOWN") %>%
+group_by(BORO,VIC_RACE) %>%
+summarize(TOT_COUNT = n()) 
+ggplot(casestb,aes(x = VIC_RACE, y = TOT_COUNT,fill=VIC_RACE)) +
+geom_bar(stat = "identity", color = "black", size = 0.1) +
+xlab("VICTIME RACE") + ylab("Total_INCIDENTS") +
+scale_x_discrete(guide = guide_axis(check.overlap = TRUE)) +
+ggtitle("Incidences per VICTIM RACE") +
+facet_wrap(~BORO, scales="free_y",ncol=1)
+```
+
+# Model Analysis: Correlation rate versus poverty % per BORO
+
+# 
+
+```{r echo=TRUE}
+casesm<-cases %>%
+#Poverty % and Population numbers per BORO were collected from Wikipedia
+#Add a column with population size
+#filter(Murder=="TRUE") %>%
+group_by(BORO)  %>%
+summarize(Incidents = n()) %>%
+mutate(Population = case_when(
+BORO == "BROOKLYN" ~ (2465326),
+BORO == "BRONX" ~ (1332650),
+BORO == "MANHATTAN" ~ (1537195),
+BORO == "QUEENS" ~ (2229379),
+BORO == "STATEN ISLAND" ~ (495747),
+    ),rate=Incidents/Population,Poverty_Per_Cent=case_when(
+BORO == "BROOKLYN" ~ (19.8),
+BORO == "BRONX" ~ (27.6),
+BORO == "MANHATTAN" ~ (17.2),
+BORO == "QUEENS" ~ (13.1),
+BORO == "STATEN ISLAND" ~ (11.2),
+    )) 
+casesm
+
+#Model Rate versus Poverty_Per_Cent
+mod <- lm(rate ~ Poverty_Per_Cent, data = casesm)
+summary(mod)
+
+ggplot(data=casesm, aes(rate,Poverty_Per_Cent)) +
+  geom_point(color="blue") +
+  geom_smooth(method = "lm", se = FALSE,color="red")  
+
+```
+
+## Conclusion
+
+I followed these steps:
+
+1- Importing Data
+
+2- Cleaning data including replacing NA and (Null) per Unknown and formatting date
+
+3- First visualization per BORO: BROOKLYN number is the highest
+
+4- Second visualization includes number of incidence per Victim Race: Black Victim Race numbers are the highest
+
+5- Adding the incident rate and Poverty_Per_Cent per BORO
+
+6- Modeling rate versus Poverty_Per_Cent
+
+Looking at the second plot, I could see clearly that "incident total numbers" for black population were the highest in all BORO. However, the model rate versus Poverty Per Cent shows a linear correlation. There are two bias that I identified:
+
+1- Certain values are UNKOWN or Null so I had to be sure that it did not add any bias to the analysis.
+
+2- The number of incidents per "Victim Race" is high in all boroughs but I had to include "Population number" and "Poverty Per Cent" columns to make it more relevant and avoid any bias.
+
+Finally, in my opinion and it was confirmed in this analysis, the poverty is an important factor and it needs to be tracked in this DATASET.
+
+```{r echo=TRUE}
+sessionInfo()
+```
